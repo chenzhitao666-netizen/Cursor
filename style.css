@@ -282,7 +282,7 @@ input[type="range"] {
 }
 
 .powerFieldMobile {
-  display: none;
+  display: grid;
 }
 
 .powerMeter {
@@ -465,18 +465,8 @@ input[type="range"] {
   }
 }
 
-@media (hover: none) and (pointer: coarse) {
-  /* mobile: use timing meter instead of slider */
-  #power {
-    display: none;
-  }
-  #powerValue {
-    display: none;
-  }
-  .powerFieldMobile {
-    display: grid;
-  }
-  .dirGrid {
-    display: none;
-  }
+/* Use timing meter on all devices */
+#power,
+#powerValue {
+  display: none;
 }

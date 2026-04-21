@@ -959,15 +959,7 @@ function drawOutcomeStamp(outcome, mode, quote) {
   ctx.restore();
 }
 
-function isMobileLike() {
-  return window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches;
-}
-
 function updateShootButtonLabel() {
-  if (!isMobileLike()) {
-    shootBtn.textContent = "射门";
-    return;
-  }
   shootBtn.textContent = state.meter.active ? "点我停球" : "射门（开始力度）";
 }
 
@@ -1242,10 +1234,6 @@ function showStampSequence(outcome, goalieDir, shotDir) {
 
 function wireEvents() {
   shootBtn.addEventListener("click", () => {
-    if (!isMobileLike()) {
-      startShot();
-      return;
-    }
     if (state.busy || isGameOver()) return;
     if (!state.meter.active) startMeter();
     else lockMeterAndShoot();
@@ -1315,7 +1303,6 @@ function wireEvents() {
   });
 
   powerMeter?.addEventListener("pointerdown", (e) => {
-    if (!isMobileLike()) return;
     if (state.busy || isGameOver()) return;
     if (!state.meter.active) return;
     e.preventDefault();
@@ -1349,13 +1336,11 @@ function wireEvents() {
       }
     }
 
-    if (k === "Enter") {
-      if (!isMobileLike()) startShot();
-      return;
-    }
-    if (k === " ") {
+    if (k === "Enter" || k === " ") {
       e.preventDefault();
-      if (!isMobileLike()) startShot();
+      if (state.busy || isGameOver()) return;
+      if (!state.meter.active) startMeter();
+      else lockMeterAndShoot();
       return;
     }
     if (k.toLowerCase() === "r") {
