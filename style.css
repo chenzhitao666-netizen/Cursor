@@ -144,9 +144,18 @@ canvas {
 .hud__value {
   font-weight: 700;
   font-size: 14px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.25;
+}
+
+#currentPlayerName {
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+#resultText {
+  max-width: 640px;
 }
 
 .panel--control {

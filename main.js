@@ -643,15 +643,13 @@ function finalizeShot() {
   skipAnimBtn.disabled = true;
 
   const outcome = state.anim.outcome;
-  const dirLabel = DIRS[state.anim.shotDir]?.label ?? "中路";
-  const goalieLabel = DIRS[state.anim.goalieDir]?.label ?? "中路";
 
   if (outcome === "GOAL") {
     const q = pickGoalQuote();
-    setHUD(`进球！你射向 ${dirLabel}，守门员扑向 ${goalieLabel}。${q ? ` ${q}` : ""}`, "good");
+    setHUD(`进球！${q ? ` ${q}` : ""}`, "good");
   }
-  else if (outcome === "SAVE") setHUD(`被扑出！你射向 ${dirLabel}，守门员扑对了方向（${goalieLabel}）。`, "warn");
-  else setHUD(`踢偏！你想射 ${dirLabel}，但球偏出了门框。`, "bad");
+  else if (outcome === "SAVE") setHUD("被扑出！", "warn");
+  else setHUD("踢偏！", "bad");
 
   // move turn forward
   advanceTurn();
