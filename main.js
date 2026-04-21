@@ -39,6 +39,32 @@ const state = {
     goalieDir: "MC",
     shotDir: "MC",
     speed: 70,
+    lastGoalQuote: "",
+  },
+  aim: {
+    active: false,
+    x: 0,
+    y: 0,
+  },
+  meter: {
+    active: false,
+    locked: false,
+    startTs: 0,
+    pos01: 0,
+  },
+  hudMsg: {
+    text: "请选择方向并射门",
+    tone: "neutral",
+    untilTs: 0,
+  },
+  stamp: {
+    visible: false,
+    mode: /** @type {"label"|"quote"} */ ("label"),
+    outcome: /** @type {ShotOutcome} */ ("MISS"),
+    quote: "",
+    goalieDir: "MC",
+    shotDir: "MC",
+    timeouts: /** @type {number[]} */ ([]),
   },
 };
 
@@ -53,13 +79,16 @@ if (!ctx) throw new Error("Canvas 不支持");
 const shootBtn = /** @type {HTMLButtonElement} */ ($("#shootBtn"));
 const resetBtn = /** @type {HTMLButtonElement} */ ($("#resetBtn"));
 const skipAnimBtn = /** @type {HTMLButtonElement} */ ($("#skipAnimBtn"));
+const soundBtn = /** @type {HTMLButtonElement|null} */ (document.querySelector("#soundBtn"));
 const powerInput = /** @type {HTMLInputElement} */ ($("#power"));
 const curveInput = /** @type {HTMLInputElement} */ ($("#curve"));
+const powerMeter = /** @type {HTMLDivElement|null} */ (document.querySelector("#powerMeter"));
+const powerBall = /** @type {HTMLDivElement|null} */ (document.querySelector("#powerBall"));
 
 const powerValue = $("#powerValue");
 const curveValue = $("#curveValue");
 const currentPlayerName = $("#currentPlayerName");
-const resultText = $("#resultText");
+const resultText = /** @type {HTMLElement|null} */ (document.querySelector("#resultText"));
 const roundPill = $("#roundPill");
 const scoreRows = $("#scoreRows");
 
@@ -86,6 +115,123 @@ const GOAL_QUOTES = [
   "这不是射门，这是宣言。",
   "门柱：还好没找我麻烦。",
   "请给门将一点尊重（但不多）。",
+];
+
+const SFX = (() => {
+  /** @type {AudioContext|null} */
+  let ac = null;
+  let enabled = true;
+
+  function ensure() {
+    if (!enabled) return null;
+    if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state === "suspended") ac.resume().catch(() => {});
+    return ac;
+  }
+
+  function setEnabled(v) {
+    enabled = !!v;
+    if (!enabled && ac && ac.state !== "closed") {
+      // keep context; just don't play
+    }
+  }
+
+  function getEnabled() {
+    return enabled;
+  }
+
+  function tone(freq, ms, type = "sine", gain = 0.06) {
+    const ctx = ensure();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms / 1000);
+    o.connect(g).connect(ctx.destination);
+    o.start(t0);
+    o.stop(t0 + ms / 1000 + 0.02);
+  }
+
+  function sweep(f0, f1, ms, type = "square", gain = 0.05) {
+    const ctx = ensure();
+    if (!ctx) return;
+    const t0 = ctx.currentTime;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(f0, t0);
+    o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t0 + ms / 1000);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(gain, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + ms / 1000);
+    o.connect(g).connect(ctx.destination);
+    o.start(t0);
+    o.stop(t0 + ms / 1000 + 0.02);
+  }
+
+  return {
+    setEnabled,
+    getEnabled,
+    unlock: ensure,
+    kick() {
+      // "thump"
+      sweep(180, 70, 90, "sine", 0.11);
+      tone(120, 70, "triangle", 0.05);
+    },
+    meterStart() {
+      tone(880, 70, "sine", 0.04);
+      tone(660, 70, "sine", 0.035);
+    },
+    meterStop(ok) {
+      if (ok) {
+        tone(880, 90, "sine", 0.05);
+        tone(1175, 120, "sine", 0.05);
+      } else {
+        tone(220, 140, "sawtooth", 0.06);
+      }
+    },
+    goal() {
+      // short cheer-like arpeggio
+      tone(523, 120, "triangle", 0.06);
+      tone(659, 160, "triangle", 0.065);
+      tone(784, 220, "triangle", 0.07);
+    },
+    save() {
+      // glove slap
+      sweep(420, 180, 120, "square", 0.06);
+      tone(160, 110, "triangle", 0.05);
+    },
+    miss() {
+      // disappointed "boo"
+      sweep(260, 140, 220, "sawtooth", 0.05);
+    },
+  };
+})();
+
+const SAVE_QUOTES = [
+  "门将开挂了！！",
+  "这手速，离谱。",
+  "被读心了！",
+  "门将：拿捏。",
+  "差一点点就进了！",
+  "这球有，但不多。",
+  "门将：谢谢你送温暖。",
+  "手套：值回票价。",
+];
+
+const MISS_QUOTES = [
+  "这脚…有点飘。",
+  "球：我想去看台。",
+  "偏了偏了！！",
+  "门框：今天不营业。",
+  "这球先放你一马。",
+  "风太大了（甩锅）。",
+  "观众：哇——（倒吸气）",
+  "下一脚一定进！",
 ];
 
 function clamp(v, a, b) {
@@ -125,6 +271,35 @@ function pickGoalQuote() {
   return q;
 }
 
+function pickOutcomeQuote(outcome) {
+  const key = outcome === "GOAL" ? "GOAL" : outcome === "SAVE" ? "SAVE" : "MISS";
+  const pools = {
+    GOAL: GOAL_QUOTES,
+    SAVE: SAVE_QUOTES,
+    MISS: MISS_QUOTES,
+  };
+  const pool = pools[key] || [];
+  if (pool.length === 0) return "";
+  if (pool.length === 1) return pool[0];
+
+  const prev =
+    key === "GOAL"
+      ? (state.anim?.lastGoalQuote ?? "")
+      : key === "SAVE"
+        ? (state.anim?.lastSaveQuote ?? "")
+        : (state.anim?.lastMissQuote ?? "");
+
+  const seed = (Date.now() ^ ((state.shotsTaken + 17) * 3266489917)) >>> 0;
+  const rnd = mulberry32(seed);
+  let q = pool[Math.floor(rnd() * pool.length)];
+  if (q === prev) q = pool[(pool.indexOf(q) + 1) % pool.length];
+
+  if (key === "GOAL") state.anim.lastGoalQuote = q;
+  if (key === "SAVE") state.anim.lastSaveQuote = q;
+  if (key === "MISS") state.anim.lastMissQuote = q;
+  return q;
+}
+
 function dirFromUI() {
   const el = /** @type {HTMLInputElement|null} */ (document.querySelector('input[name="dir"]:checked'));
   return (el?.value || "MC");
@@ -161,16 +336,79 @@ function moveDirBy(dx, dy) {
   }
 }
 
+function pickDirFromCanvasPointer(clientX, clientY) {
+  const rect = pitch.getBoundingClientRect();
+  const sx = (clientX - rect.left) / rect.width;
+  const sy = (clientY - rect.top) / rect.height;
+  if (sx < 0 || sx > 1 || sy < 0 || sy > 1) return null;
+
+  const x = sx * geom.w;
+  const y = sy * geom.h;
+
+  // Map a tap to a 3x3 cell of the goal mouth. If you tap outside the goal,
+  // still project into the goal rectangle for easier mobile aiming.
+  const gx = geom.goal.x;
+  const gy = geom.goal.y;
+  const gw = geom.goal.w;
+  const gh = geom.goal.h;
+
+  const px = clamp(x, gx, gx + gw);
+  const py = clamp(y, gy, gy + gh);
+
+  const relX = (px - gx) / gw;
+  const relY = (py - gy) / gh;
+
+  const col = clamp(Math.floor(relX * 3), 0, 2);
+  const row = clamp(Math.floor(relY * 3), 0, 2);
+  return coordToDir(col, row);
+}
+
+function aimPointFromCanvasPointer(clientX, clientY) {
+  const rect = pitch.getBoundingClientRect();
+  const sx = (clientX - rect.left) / rect.width;
+  const sy = (clientY - rect.top) / rect.height;
+  if (sx < 0 || sx > 1 || sy < 0 || sy > 1) return null;
+
+  const x = sx * geom.w;
+  const y = sy * geom.h;
+
+  const gx = geom.goal.x;
+  const gy = geom.goal.y;
+  const gw = geom.goal.w;
+  const gh = geom.goal.h;
+
+  const ax = clamp(x, gx + 18, gx + gw - 18);
+  const ay = clamp(y, gy + 18, gy + gh - 18);
+  return { x: ax, y: ay };
+}
+
+function aimPointToDir(aim) {
+  const gx = geom.goal.x;
+  const gy = geom.goal.y;
+  const gw = geom.goal.w;
+  const gh = geom.goal.h;
+  const relX = clamp((aim.x - gx) / gw, 0, 0.999999);
+  const relY = clamp((aim.y - gy) / gh, 0, 0.999999);
+  const col = clamp(Math.floor(relX * 3), 0, 2);
+  const row = clamp(Math.floor(relY * 3), 0, 2);
+  return coordToDir(col, row);
+}
+
+function getShotDir() {
+  if (state.aim.active) return aimPointToDir({ x: state.aim.x, y: state.aim.y });
+  return dirFromUI();
+}
+
+function getAimTarget(curvePx) {
+  if (state.aim.active) return { x: state.aim.x, y: state.aim.y };
+  return goalTargetForDir(dirFromUI(), curvePx);
+}
+
 function setHUD(text, tone = "neutral") {
-  resultText.textContent = text;
-  resultText.style.color =
-    tone === "good"
-      ? "rgba(34, 197, 94, 0.95)"
-      : tone === "bad"
-        ? "rgba(239, 68, 68, 0.95)"
-        : tone === "warn"
-          ? "rgba(245, 158, 11, 0.95)"
-          : "rgba(255, 255, 255, 0.92)";
+  // Keep as silent state only (HUD element is hidden in CSS).
+  state.hudMsg.text = text;
+  state.hudMsg.tone = tone;
+  state.hudMsg.untilTs = performance.now() + 2600;
 }
 
 function getTotals() {
@@ -228,12 +466,20 @@ function updateHeader() {
 }
 
 function resetGame() {
+  clearStampTimers();
+  state.stamp.visible = false;
   state.round = 1;
   state.shooterIdx = 0;
   state.shotsTaken = 0;
   state.busy = false;
   state.history = CONFIG.players.map(() => []);
   state.anim.running = false;
+  state.aim.active = false;
+  state.meter.active = false;
+  state.meter.locked = false;
+  setPowerBallPos01(0.5);
+  powerMeter?.classList.remove("powerMeter--armed");
+  powerMeter?.classList.remove("powerMeter--locked");
   setDirToUI("MC");
   powerInput.value = "70";
   curveInput.value = "25";
@@ -244,6 +490,7 @@ function resetGame() {
   renderScoreboard();
   updateHeader();
   drawStatic();
+  updateShootButtonLabel();
 }
 
 function isGameOver() {
@@ -343,13 +590,14 @@ function lockUI(locked) {
   $$(".dir input").forEach((el) => (/** @type {HTMLInputElement} */ (el).disabled = locked));
   powerInput.disabled = locked;
   curveInput.disabled = locked;
+  if (powerMeter) powerMeter.style.pointerEvents = locked ? "none" : "auto";
 }
 
 function drawStatic() {
   drawScene({
     ball: null,
     goalie: { x: geom.goal.x + geom.goal.w / 2, y: geom.goal.y + geom.goal.h * 0.62 },
-    aim: goalTargetForDir(dirFromUI(), Number(curveInput.value) * 0.6),
+    aim: getAimTarget(Number(curveInput.value) * 0.6),
     outcome: null,
     goalieDir: null,
     shotDir: null,
@@ -407,9 +655,111 @@ function drawScene({ ball, goalie, aim, outcome, goalieDir, shotDir }) {
   drawShooter(geom.spot.x - 50, geom.spot.y + 20);
 
   // overlay for outcome at end frame
-  if (outcome && !state.anim.running) {
-    drawOutcomeStamp(outcome);
+  if (state.stamp.visible && !state.anim.running) {
+    drawOutcomeStamp(state.stamp.outcome, state.stamp.mode, state.stamp.quote);
   }
+
+  // draw message on the goal area (instead of HUD result line)
+  // drawGoalMessage();
+}
+
+function toneToColor(tone) {
+  if (tone === "good") return "rgba(34, 197, 94, 0.98)";
+  if (tone === "bad") return "rgba(239, 68, 68, 0.98)";
+  if (tone === "warn") return "rgba(245, 158, 11, 0.98)";
+  return "rgba(255, 255, 255, 0.94)";
+}
+
+function wrapTextLines(text, maxWidth) {
+  const words = String(text).split(/\s+/g);
+  if (words.length <= 1) {
+    // Chinese text usually has no spaces; fallback to char wrapping
+    const chars = Array.from(String(text));
+    const lines = [];
+    let line = "";
+    for (const ch of chars) {
+      const test = line + ch;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        lines.push(line);
+        line = ch;
+      } else {
+        line = test;
+      }
+    }
+    if (line) lines.push(line);
+    return lines;
+  }
+
+  const lines = [];
+  let line = "";
+  for (const w of words) {
+    const test = line ? `${line} ${w}` : w;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = w;
+    } else {
+      line = test;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function drawGoalMessage() {
+  const text = state.hudMsg?.text || "";
+  if (!text) return;
+
+  const now = performance.now();
+  const until = state.hudMsg.untilTs || 0;
+
+  // If no TTL set yet, keep it visible.
+  const remain = until > 0 ? until - now : 999999;
+  if (remain <= -200) return;
+
+  const fade = until > 0 ? clamp(remain / 500, 0, 1) : 1; // last 500ms fade out
+
+  const gx = geom.goal.x;
+  const gy = geom.goal.y;
+  const gw = geom.goal.w;
+
+  const maxWidth = gw - 46;
+  ctx.save();
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  // Bigger + punchier for readability on mobile.
+  ctx.font = "800 18px ui-sans-serif, system-ui";
+
+  const lines = wrapTextLines(text, maxWidth);
+  const lineH = 18;
+  const blockH = lines.length * lineH;
+  const cx = gx + gw / 2;
+  // Slightly overlap into the goal area (instead of sitting above it).
+  const cy = gy + 24;
+
+  // background pill
+  ctx.globalAlpha = 0.35 * fade;
+  ctx.fillStyle = "rgba(0,0,0,0.38)";
+  const padX = 14;
+  const padY = 9;
+  const boxW = Math.min(gw, Math.max(220, Math.min(gw, maxWidth + padX * 2)));
+  const boxH = blockH + padY * 2;
+  ctx.beginPath();
+  ctx.roundRect(cx - boxW / 2, cy - boxH / 2, boxW, boxH, 14);
+  ctx.fill();
+
+  // text
+  ctx.globalAlpha = 0.95 * fade;
+  const color = toneToColor(state.hudMsg.tone);
+  ctx.shadowColor = "rgba(0,0,0,0.55)";
+  ctx.shadowBlur = 6;
+  ctx.shadowOffsetY = 1;
+  ctx.fillStyle = color;
+  for (let i = 0; i < lines.length; i++) {
+    const y = cy - (blockH - lineH) / 2 + i * lineH;
+    ctx.fillText(lines[i], cx, y);
+  }
+
+  ctx.restore();
 }
 
 function drawGoal() {
@@ -568,25 +918,17 @@ function drawGoalie(x, y, goalieDir, shotDir, outcome) {
   ctx.roundRect(armSpread - 4, -10, 14, 12, 6);
   ctx.fill();
 
-  // small indicator text (debug-ish but subtle)
-  if (!state.anim.running && goalieDir && shotDir && outcome) {
-    ctx.globalAlpha = 0.9;
-    ctx.font = "12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
-    ctx.textAlign = "center";
-    ctx.fillStyle = "rgba(255,255,255,0.86)";
-    ctx.fillText(`${goalieDir} vs ${shotDir}`, 0, 52);
-  }
   ctx.restore();
 }
 
-function drawOutcomeStamp(outcome) {
+function drawOutcomeStamp(outcome, mode, quote) {
   ctx.save();
-  ctx.globalAlpha = 0.92;
+  ctx.globalAlpha = 0.95;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = "800 54px ui-sans-serif, system-ui";
 
-  const label = outcome === "GOAL" ? "进球！" : outcome === "SAVE" ? "扑出！" : "踢偏！";
+  const label = outcome === "GOAL" ? "进球！！！" : outcome === "SAVE" ? "扑出！！" : "踢偏！！";
+
   const color =
     outcome === "GOAL"
       ? "rgba(34, 197, 94, 0.98)"
@@ -594,23 +936,139 @@ function drawOutcomeStamp(outcome) {
         ? "rgba(245, 158, 11, 0.98)"
         : "rgba(239, 68, 68, 0.98)";
 
-  ctx.strokeStyle = "rgba(0,0,0,0.32)";
-  ctx.lineWidth = 10;
-  ctx.strokeText(label, geom.w / 2, 62);
-  ctx.fillStyle = color;
-  ctx.fillText(label, geom.w / 2, 62);
+  if (mode === "label") {
+    ctx.font = "900 58px ui-sans-serif, system-ui";
+    ctx.strokeStyle = "rgba(0,0,0,0.32)";
+    ctx.lineWidth = 12;
+    ctx.strokeText(label, geom.w / 2, 66);
+    ctx.fillStyle = color;
+    ctx.fillText(label, geom.w / 2, 66);
+  }
+
+  if (mode === "quote" && quote) {
+    // Quote in the same big "stamp" style (same color).
+    ctx.font = "900 42px ui-sans-serif, system-ui";
+    ctx.globalAlpha = 0.95;
+    ctx.strokeStyle = "rgba(0,0,0,0.30)";
+    ctx.lineWidth = 10;
+    ctx.strokeText(quote, geom.w / 2, 98);
+    ctx.fillStyle = color;
+    ctx.fillText(quote, geom.w / 2, 98);
+  }
+
   ctx.restore();
+}
+
+function isMobileLike() {
+  return window.matchMedia && window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+}
+
+function updateShootButtonLabel() {
+  if (!isMobileLike()) {
+    shootBtn.textContent = "射门";
+    return;
+  }
+  shootBtn.textContent = state.meter.active ? "点我停球" : "射门（开始力度）";
+}
+
+function setPowerBallPos01(pos01) {
+  state.meter.pos01 = clamp(pos01, 0, 1);
+  if (!powerBall) return;
+  powerBall.style.left = `${state.meter.pos01 * 100}%`;
+}
+
+function meterInGreen(pos01) {
+  return pos01 >= 1 / 3 && pos01 <= 2 / 3;
+}
+
+function startMeter() {
+  if (!powerMeter || !powerBall) return;
+  if (state.meter.active || state.busy || isGameOver()) return;
+
+  state.meter.active = true;
+  state.meter.locked = false;
+  state.meter.startTs = performance.now();
+  powerMeter.classList.add("powerMeter--armed");
+  powerMeter.classList.remove("powerMeter--locked");
+  setHUD("停在绿色区，才算有效射门", "neutral");
+  SFX.meterStart();
+  updateShootButtonLabel();
+  requestAnimationFrame(tickMeter);
+}
+
+function lockMeterAndShoot() {
+  if (!powerMeter) return;
+  if (!state.meter.active) return;
+
+  state.meter.active = false;
+  state.meter.locked = true;
+  powerMeter.classList.remove("powerMeter--armed");
+  powerMeter.classList.add("powerMeter--locked");
+  updateShootButtonLabel();
+
+  const pos = state.meter.pos01;
+  const ok = meterInGreen(pos);
+  SFX.meterStop(ok);
+  if (!ok) {
+    // timing failed -> immediate miss, but still play animation
+    const shotDir = getShotDir();
+    const curve = Number(curveInput.value);
+    const target = state.aim.active ? { x: state.aim.x, y: state.aim.y } : goalTargetForDir(shotDir, curve * 0.75);
+    const missTarget = { x: target.x + (target.x < geom.goal.x + geom.goal.w / 2 ? -40 : 40), y: target.y + 22 };
+
+    state.history[state.shooterIdx].push("MISS");
+    state.anim.stampQuote = pickOutcomeQuote("MISS");
+
+    state.anim.running = true;
+    state.anim.startTs = performance.now();
+    state.anim.from = { x: geom.spot.x, y: geom.spot.y };
+    state.anim.to = missTarget;
+    state.anim.curve = curve;
+    state.anim.goalieFrom = goalieTargetForDir("MC");
+    state.anim.goalieDir = "MC";
+    state.anim.goalieTo = goalieTargetForDir("MC");
+    state.anim.outcome = "MISS";
+    state.anim.shotDir = shotDir;
+    state.anim.speed = 74;
+
+    lockUI(true);
+    skipAnimBtn.disabled = false;
+    renderScoreboard();
+    SFX.kick();
+    SFX.miss();
+    requestAnimationFrame(tick);
+    return;
+  }
+
+  // timing ok -> map to a speed; closer to center = faster (harder to save)
+  const dist = Math.abs(pos - 0.5);
+  const halfGreen = 1 / 6;
+  const quality = clamp(1 - dist / halfGreen, 0, 1);
+  const speed = Math.round(62 + quality * 34);
+  powerInput.value = String(speed);
+  powerValue.textContent = String(speed);
+  startShot();
+}
+
+function tickMeter(ts) {
+  if (!state.meter.active) return;
+  const t = (ts - state.meter.startTs) / 900;
+  const pos = 0.5 + 0.5 * Math.sin(t * Math.PI * 2);
+  setPowerBallPos01(pos);
+  requestAnimationFrame(tickMeter);
 }
 
 function startShot() {
   if (state.busy || isGameOver()) return;
 
-  const shotDir = dirFromUI();
+  const shotDir = getShotDir();
   const speed = Number(powerInput.value);
   const curve = Number(curveInput.value);
 
   const goalieDir = chooseGoalieDir(shotDir, speed, curve);
   const outcome = outcomeForShot(shotDir, goalieDir, speed, curve);
+  state.anim.stampQuote = pickOutcomeQuote(outcome);
+  SFX.kick();
 
   // store now (so skip animation still consistent)
   state.history[state.shooterIdx].push(outcome);
@@ -618,7 +1076,7 @@ function startShot() {
   state.anim.running = true;
   state.anim.startTs = performance.now();
   state.anim.from = { x: geom.spot.x, y: geom.spot.y };
-  state.anim.to = goalTargetForDir(shotDir, curve * 0.75);
+  state.anim.to = state.aim.active ? { x: state.aim.x, y: state.aim.y } : goalTargetForDir(shotDir, curve * 0.75);
   state.anim.curve = curve;
   state.anim.goalieFrom = goalieTargetForDir("MC");
   state.anim.goalieTo = goalieTargetForDir(goalieDir);
@@ -630,8 +1088,7 @@ function startShot() {
   lockUI(true);
   skipAnimBtn.disabled = false;
 
-  const dirLabel = DIRS[shotDir]?.label ?? "中路";
-  setHUD(`射向 ${dirLabel}…`, "neutral");
+  setHUD("起脚！", "neutral");
   renderScoreboard();
 
   requestAnimationFrame(tick);
@@ -646,10 +1103,10 @@ function finalizeShot() {
 
   if (outcome === "GOAL") {
     const q = pickGoalQuote();
-    setHUD(`进球！${q ? ` ${q}` : ""}`, "good");
+    setHUD(`进球！！！${q ? ` ${q}` : ""}`, "good");
   }
-  else if (outcome === "SAVE") setHUD("被扑出！", "warn");
-  else setHUD("踢偏！", "bad");
+  else if (outcome === "SAVE") setHUD("被扑出！！", "warn");
+  else setHUD("踢偏！！", "bad");
 
   // move turn forward
   advanceTurn();
@@ -665,16 +1122,6 @@ function finalizeShot() {
       .sort((a, b) => b.goals - a.goals)[0]?.i;
     const winner = winnerIdx !== undefined ? CONFIG.players[winnerIdx] : "—";
     setHUD(`比赛结束：总进球 ${sum}。最佳射手：${winner}。点击“重开”再来一局。`, "neutral");
-  } else {
-    // draw end frame with stamp
-    drawScene({
-      ball: null,
-      goalie: goalieTargetForDir(state.anim.goalieDir),
-      aim: goalTargetForDir(dirFromUI(), Number(curveInput.value) * 0.6),
-      outcome: state.anim.outcome,
-      goalieDir: state.anim.goalieDir,
-      shotDir: state.anim.shotDir,
-    });
   }
 }
 
@@ -719,15 +1166,7 @@ function tick(ts) {
   if (baseT >= 1) {
     // last frame: show outcome stamp for a moment, then unlock
     state.anim.running = false;
-    drawScene({
-      ball: null,
-      goalie: { x: gTo.x, y: gTo.y },
-      aim: null,
-      outcome: state.anim.outcome,
-      goalieDir: state.anim.goalieDir,
-      shotDir: state.anim.shotDir,
-    });
-
+    showStampSequence(state.anim.outcome, state.anim.goalieDir, state.anim.shotDir);
     setTimeout(() => finalizeShot(), 350);
     return;
   }
@@ -744,21 +1183,125 @@ function skipAnimation() {
   if (!state.anim.running) return;
   // immediately draw end frame and finalize
   state.anim.running = false;
-  drawScene({
-    ball: null,
-    goalie: state.anim.goalieTo,
-    aim: null,
-    outcome: state.anim.outcome,
-    goalieDir: state.anim.goalieDir,
-    shotDir: state.anim.shotDir,
-  });
+  showStampSequence(state.anim.outcome, state.anim.goalieDir, state.anim.shotDir);
   finalizeShot();
 }
 
+function clearStampTimers() {
+  for (const id of state.stamp.timeouts) window.clearTimeout(id);
+  state.stamp.timeouts = [];
+}
+
+function showStampSequence(outcome, goalieDir, shotDir) {
+  clearStampTimers();
+  state.stamp.visible = true;
+  state.stamp.mode = "label";
+  state.stamp.outcome = outcome;
+  state.stamp.quote = pickOutcomeQuote(outcome);
+  state.stamp.goalieDir = goalieDir;
+  state.stamp.shotDir = shotDir;
+
+  // Draw once immediately (label)
+  drawScene({
+    ball: null,
+    goalie: goalieTargetForDir(goalieDir),
+    aim: null,
+    outcome: null,
+    goalieDir,
+    shotDir,
+  });
+
+  // Fire outcome sound once, synced with the stamp.
+  if (outcome === "GOAL") SFX.goal();
+  else if (outcome === "SAVE") SFX.save();
+  else SFX.miss();
+
+  // After 1s, switch to quote only
+  state.stamp.timeouts.push(
+    window.setTimeout(() => {
+      state.stamp.mode = "quote";
+      drawScene({
+        ball: null,
+        goalie: goalieTargetForDir(goalieDir),
+        aim: null,
+        outcome: null,
+        goalieDir,
+        shotDir,
+      });
+    }, 1000)
+  );
+
+  // After additional 1.2s, hide everything and redraw static
+  state.stamp.timeouts.push(
+    window.setTimeout(() => {
+      state.stamp.visible = false;
+      drawStatic();
+    }, 2200)
+  );
+}
+
 function wireEvents() {
-  shootBtn.addEventListener("click", () => startShot());
+  shootBtn.addEventListener("click", () => {
+    if (!isMobileLike()) {
+      startShot();
+      return;
+    }
+    if (state.busy || isGameOver()) return;
+    if (!state.meter.active) startMeter();
+    else lockMeterAndShoot();
+  });
   resetBtn.addEventListener("click", () => resetGame());
+  // Unlock audio on first user gesture (mobile browsers require this).
+  const unlockOnce = () => {
+    SFX.unlock();
+    window.removeEventListener("pointerdown", unlockOnce);
+    window.removeEventListener("keydown", unlockOnce);
+  };
+  window.addEventListener("pointerdown", unlockOnce, { once: true });
+  window.addEventListener("keydown", unlockOnce, { once: true });
+
+  soundBtn?.addEventListener("click", () => {
+    const next = !SFX.getEnabled();
+    SFX.setEnabled(next);
+    soundBtn.setAttribute("aria-pressed", String(next));
+    soundBtn.textContent = next ? "声音：开" : "声音：关";
+    if (next) SFX.meterStart();
+  });
+
   skipAnimBtn.addEventListener("click", () => skipAnimation());
+
+  // Mobile-friendly aiming: drag on the goal to move dashed aim.
+  pitch.addEventListener("pointerdown", (e) => {
+    if (state.busy || isGameOver()) return;
+    const aim = aimPointFromCanvasPointer(e.clientX, e.clientY);
+    if (!aim) return;
+    e.preventDefault();
+    pitch.setPointerCapture?.(e.pointerId);
+    state.aim.active = true;
+    state.aim.x = aim.x;
+    state.aim.y = aim.y;
+    setDirToUI(aimPointToDir(aim));
+    drawStatic();
+  });
+
+  pitch.addEventListener("pointermove", (e) => {
+    if (!state.aim.active) return;
+    if (state.busy || isGameOver()) return;
+    const aim = aimPointFromCanvasPointer(e.clientX, e.clientY);
+    if (!aim) return;
+    e.preventDefault();
+    state.aim.x = aim.x;
+    state.aim.y = aim.y;
+    setDirToUI(aimPointToDir(aim));
+    drawStatic();
+  });
+
+  const endAim = (e) => {
+    if (!state.aim.active) return;
+    e.preventDefault?.();
+  };
+  pitch.addEventListener("pointerup", endAim);
+  pitch.addEventListener("pointercancel", endAim);
 
   powerInput.addEventListener("input", () => {
     powerValue.textContent = String(powerInput.value);
@@ -769,6 +1312,14 @@ function wireEvents() {
   });
   $$('input[name="dir"]').forEach((el) => {
     el.addEventListener("change", () => drawStatic());
+  });
+
+  powerMeter?.addEventListener("pointerdown", (e) => {
+    if (!isMobileLike()) return;
+    if (state.busy || isGameOver()) return;
+    if (!state.meter.active) return;
+    e.preventDefault();
+    lockMeterAndShoot();
   });
 
   window.addEventListener("keydown", (e) => {
@@ -799,12 +1350,12 @@ function wireEvents() {
     }
 
     if (k === "Enter") {
-      startShot();
+      if (!isMobileLike()) startShot();
       return;
     }
     if (k === " ") {
       e.preventDefault();
-      startShot();
+      if (!isMobileLike()) startShot();
       return;
     }
     if (k.toLowerCase() === "r") {
@@ -840,4 +1391,5 @@ if (!CanvasRenderingContext2D.prototype.roundRect) {
 
 wireEvents();
 resetGame();
+updateShootButtonLabel();
 

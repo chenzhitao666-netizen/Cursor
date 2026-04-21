@@ -15,6 +15,7 @@
         </div>
         <div class="meta">
           <div class="pill" id="roundPill">第 1 轮</div>
+          <button class="btn btn--ghost" id="soundBtn" type="button" aria-pressed="true">声音：开</button>
           <button class="btn btn--ghost" id="resetBtn" type="button">重开</button>
         </div>
       </header>
@@ -27,10 +28,6 @@
               <div class="hud__line">
                 <span class="hud__label">当前球员</span>
                 <span class="hud__value" id="currentPlayerName">球员 1</span>
-              </div>
-              <div class="hud__line">
-                <span class="hud__label">结果</span>
-                <span class="hud__value" id="resultText">请选择方向并射门</span>
               </div>
             </div>
           </div>
@@ -94,6 +91,21 @@
               </div>
               <input id="power" type="range" min="20" max="100" value="70" />
               <div class="field__hint">力度越大球速越快，但越容易偏出门框。</div>
+            </div>
+
+            <div class="field powerFieldMobile" id="powerFieldMobile" aria-label="手机力度进度条">
+              <div class="field__label">力度挑战（手机）</div>
+              <div class="powerMeter" id="powerMeter" role="button" tabindex="0" aria-label="点击停下足球决定力度">
+                <div class="powerMeter__track">
+                  <div class="powerMeter__zone powerMeter__zone--bad"></div>
+                  <div class="powerMeter__zone powerMeter__zone--good"></div>
+                  <div class="powerMeter__zone powerMeter__zone--bad"></div>
+                </div>
+                <div class="powerMeter__ball" id="powerBall" aria-hidden="true"></div>
+              </div>
+              <div class="field__hint">
+                玩法：先点“射门”开始移动，再点一次停球。停在中间绿色区才算有效射门，否则直接踢偏。
+              </div>
             </div>
 
             <div class="field">
