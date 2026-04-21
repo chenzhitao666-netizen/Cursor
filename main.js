@@ -73,6 +73,21 @@ const geom = {
   spot: { x: 490, y: 420 },
 };
 
+const GOAL_QUOTES = [
+  "这脚有点东西！",
+  "角度刁钻，门将只能目送。",
+  "球网：我裂开了。",
+  "一脚世界波（点球版）。",
+  "门将：我尽力了。",
+  "冷静，像训练一样。",
+  "这脚踢得很“教科书”。",
+  "稳！像装了导航。",
+  "球：直奔幸福而去。",
+  "这不是射门，这是宣言。",
+  "门柱：还好没找我麻烦。",
+  "请给门将一点尊重（但不多）。",
+];
+
 function clamp(v, a, b) {
   return Math.max(a, Math.min(b, v));
 }
@@ -94,6 +109,20 @@ function mulberry32(seed) {
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+function pickGoalQuote() {
+  // avoid repeating the same quote consecutively
+  const prev = state.anim?.lastGoalQuote ?? "";
+  if (GOAL_QUOTES.length === 0) return "";
+  if (GOAL_QUOTES.length === 1) return GOAL_QUOTES[0];
+
+  const seed = (Date.now() ^ ((state.shotsTaken + 11) * 2246822519)) >>> 0;
+  const rnd = mulberry32(seed);
+  let q = GOAL_QUOTES[Math.floor(rnd() * GOAL_QUOTES.length)];
+  if (q === prev) q = GOAL_QUOTES[(GOAL_QUOTES.indexOf(q) + 1) % GOAL_QUOTES.length];
+  state.anim.lastGoalQuote = q;
+  return q;
 }
 
 function dirFromUI() {
@@ -617,7 +646,10 @@ function finalizeShot() {
   const dirLabel = DIRS[state.anim.shotDir]?.label ?? "中路";
   const goalieLabel = DIRS[state.anim.goalieDir]?.label ?? "中路";
 
-  if (outcome === "GOAL") setHUD(`进球！你射向 ${dirLabel}，守门员扑向 ${goalieLabel}。`, "good");
+  if (outcome === "GOAL") {
+    const q = pickGoalQuote();
+    setHUD(`进球！你射向 ${dirLabel}，守门员扑向 ${goalieLabel}。${q ? ` ${q}` : ""}`, "good");
+  }
   else if (outcome === "SAVE") setHUD(`被扑出！你射向 ${dirLabel}，守门员扑对了方向（${goalieLabel}）。`, "warn");
   else setHUD(`踢偏！你想射 ${dirLabel}，但球偏出了门框。`, "bad");
 
