@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>点球大战：三人轮番</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div class="brand">
+          <div class="brand__title">点球大战</div>
+          <div class="brand__subtitle">三个球员轮番射门 · 守门员扑救</div>
+        </div>
+        <div class="meta">
+          <div class="pill" id="roundPill">第 1 轮</div>
+          <button class="btn btn--ghost" id="resetBtn" type="button">重开</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <section class="panel panel--pitch" aria-label="球场与动画">
+          <div class="pitchWrap">
+            <canvas id="pitch" width="980" height="520"></canvas>
+            <div class="hud">
+              <div class="hud__line">
+                <span class="hud__label">当前球员</span>
+                <span class="hud__value" id="currentPlayerName">球员 1</span>
+              </div>
+              <div class="hud__line">
+                <span class="hud__label">结果</span>
+                <span class="hud__value" id="resultText">请选择方向并射门</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel panel--control" aria-label="操作面板">
+          <div class="scoreboard">
+            <div class="scoreboard__title">计分板</div>
+            <div class="scoreRows" id="scoreRows" role="list"></div>
+          </div>
+
+          <div class="controls">
+            <div class="controls__title">射门设置</div>
+
+            <div class="field">
+              <div class="field__label">方向</div>
+              <div class="dirGrid" role="radiogroup" aria-label="射门方向">
+                <label class="dir">
+                  <input type="radio" name="dir" value="TL" />
+                  <span>左上</span>
+                </label>
+                <label class="dir">
+                  <input type="radio" name="dir" value="TC" />
+                  <span>中上</span>
+                </label>
+                <label class="dir">
+                  <input type="radio" name="dir" value="TR" />
+                  <span>右上</span>
+                </label>
+                <label class="dir">
+                  <input type="radio" name="dir" value="ML" />
+                  <span>左中</span>
+                </label>
+                <label class="dir">
+                  <input type="radio" name="dir" value="MC" checked />
+                  <span>中路</span>
+                </label>
+                <label class="dir">
+                  <input type="radio" name="dir" value="MR" />
+                  <span>右中</span>
+                </label>
+                <label class="dir">
+                  <input type="radio" name="dir" value="BL" />
+                  <span>左下</span>
+                </label>
+                <label class="dir">
+                  <input type="radio" name="dir" value="BC" />
+                  <span>中下</span>
+                </label>
+                <label class="dir">
+                  <input type="radio" name="dir" value="BR" />
+                  <span>右下</span>
+                </label>
+              </div>
+              <div class="field__hint">小提示：上角更难扑，但容易踢飞。</div>
+            </div>
+
+            <div class="field">
+              <div class="field__label">
+                力度 <span class="field__value" id="powerValue">70</span>
+              </div>
+              <input id="power" type="range" min="20" max="100" value="70" />
+              <div class="field__hint">力度越大球速越快，但越容易偏出门框。</div>
+            </div>
+
+            <div class="field">
+              <div class="field__label">
+                弧度 <span class="field__value" id="curveValue">25</span>
+              </div>
+              <input id="curve" type="range" min="0" max="60" value="25" />
+              <div class="field__hint">弧度会轻微改变落点（守门员不一定猜得到）。</div>
+            </div>
+
+            <div class="actions">
+              <button class="btn" id="shootBtn" type="button">射门</button>
+              <button class="btn btn--ghost" id="skipAnimBtn" type="button">跳过动画</button>
+            </div>
+
+            <div class="rules">
+              <div class="rules__title">规则</div>
+              <ul class="rules__list">
+                <li>三名球员轮流罚点球，每人每轮 1 脚。</li>
+                <li>默认 5 轮，共 15 次射门；结束后统计总进球。</li>
+                <li>守门员会“猜”一个方向并扑救；球太靠角或速度太快更难扑。</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="footer__hint">
+          本地运行：直接双击打开 <code>index.html</code> 即可。
+        </div>
+      </footer>
+    </div>
+
+    <script src="./main.js" defer></script>
+  </body>
+</html>
