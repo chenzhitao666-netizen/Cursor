@@ -7,14 +7,14 @@
     <link rel="stylesheet" href="./style.css?v=20260421" />
   </head>
   <body>
-    <div class="app">
+    <div class="app" id="appRoot">
       <header class="header">
         <div class="brand">
-          <div class="brand__title">点球大战</div>
-          <div class="brand__subtitle">三个球员轮番射门 · 守门员扑救</div>
+          <div class="brand__title">33中点球大战</div>
+          <div class="brand__subtitle">点球大战</div>
         </div>
         <div class="meta">
-          <div class="pill" id="roundPill">第 1 轮</div>
+          <div class="pill" id="roundPill">陈志涛</div>
           <button class="btn btn--ghost" id="soundBtn" type="button" aria-pressed="true">声音：开</button>
           <button class="btn btn--ghost" id="resetBtn" type="button">重开</button>
         </div>
@@ -24,110 +24,29 @@
         <section class="panel panel--pitch" aria-label="球场与动画">
           <div class="pitchWrap">
             <canvas id="pitch" width="980" height="520"></canvas>
+            <div class="miniScore" id="miniScore" aria-label="迷你计分板">
+              <div class="miniScore__points" id="miniScorePoints">0</div>
+              <div class="miniScore__dots" id="miniScoreDots" aria-hidden="true"></div>
+            </div>
+            <div class="powerOverlay" id="powerOverlay" aria-label="力度挑战覆盖层">
+              <div class="powerOverlay__inner field powerFieldMobile" id="powerFieldMobile">
+                <div class="field__label">力度挑战</div>
+                <div class="powerMeter" id="powerMeter" role="button" tabindex="0" aria-label="点击停下足球决定力度">
+                  <div class="powerMeter__track">
+                    <div class="powerMeter__zone powerMeter__zone--bad"></div>
+                    <div class="powerMeter__zone powerMeter__zone--good"></div>
+                    <div class="powerMeter__zone powerMeter__zone--bad"></div>
+                  </div>
+                  <div class="powerMeter__ball" id="powerBall" aria-hidden="true"></div>
+                </div>
+                <div class="field__hint">点一下停球选力度</div>
+              </div>
+            </div>
             <div class="hud">
               <div class="hud__line">
                 <span class="hud__label">当前球员</span>
-                <span class="hud__value" id="currentPlayerName">球员 1</span>
+                <span class="hud__value" id="currentPlayerName">陈志涛</span>
               </div>
-            </div>
-          </div>
-        </section>
-
-        <section class="panel panel--control" aria-label="操作面板">
-          <div class="scoreboard">
-            <div class="scoreboard__title">计分板</div>
-            <div class="scoreRows" id="scoreRows" role="list"></div>
-          </div>
-
-          <div class="controls">
-            <div class="controls__title">射门设置</div>
-
-            <div class="field">
-              <div class="field__label">方向</div>
-              <div class="dirGrid" role="radiogroup" aria-label="射门方向">
-                <label class="dir">
-                  <input type="radio" name="dir" value="TL" />
-                  <span>左上</span>
-                </label>
-                <label class="dir">
-                  <input type="radio" name="dir" value="TC" />
-                  <span>中上</span>
-                </label>
-                <label class="dir">
-                  <input type="radio" name="dir" value="TR" />
-                  <span>右上</span>
-                </label>
-                <label class="dir">
-                  <input type="radio" name="dir" value="ML" />
-                  <span>左中</span>
-                </label>
-                <label class="dir">
-                  <input type="radio" name="dir" value="MC" checked />
-                  <span>中路</span>
-                </label>
-                <label class="dir">
-                  <input type="radio" name="dir" value="MR" />
-                  <span>右中</span>
-                </label>
-                <label class="dir">
-                  <input type="radio" name="dir" value="BL" />
-                  <span>左下</span>
-                </label>
-                <label class="dir">
-                  <input type="radio" name="dir" value="BC" />
-                  <span>中下</span>
-                </label>
-                <label class="dir">
-                  <input type="radio" name="dir" value="BR" />
-                  <span>右下</span>
-                </label>
-              </div>
-              <div class="field__hint">小提示：上角更难扑，但容易踢飞。</div>
-            </div>
-
-            <div class="field">
-              <div class="field__label">
-                力度 <span class="field__value" id="powerValue">70</span>
-              </div>
-              <input id="power" type="range" min="20" max="100" value="70" />
-              <div class="field__hint">力度越大球速越快，但越容易偏出门框。</div>
-            </div>
-
-            <div class="field powerFieldMobile" id="powerFieldMobile" aria-label="手机力度进度条">
-              <div class="field__label">力度挑战（手机）</div>
-              <div class="powerMeter" id="powerMeter" role="button" tabindex="0" aria-label="点击停下足球决定力度">
-                <div class="powerMeter__track">
-                  <div class="powerMeter__zone powerMeter__zone--bad"></div>
-                  <div class="powerMeter__zone powerMeter__zone--good"></div>
-                  <div class="powerMeter__zone powerMeter__zone--bad"></div>
-                </div>
-                <div class="powerMeter__ball" id="powerBall" aria-hidden="true"></div>
-              </div>
-              <div class="field__hint">
-                玩法：先点“射门”开始移动，再点一次停球。停在中间绿色区才算有效射门，否则直接踢偏。
-              </div>
-            </div>
-
-            <div class="field">
-              <div class="field__label">
-                弧度 <span class="field__value" id="curveValue">25</span>
-              </div>
-              <input id="curve" type="range" min="0" max="60" value="25" />
-              <div class="field__hint">弧度会轻微改变落点（守门员不一定猜得到）。</div>
-            </div>
-
-            <div class="actions">
-              <button class="btn" id="shootBtn" type="button">射门</button>
-              <button class="btn btn--ghost" id="skipAnimBtn" type="button">跳过动画</button>
-            </div>
-
-            <div class="rules">
-              <div class="rules__title">规则</div>
-              <ul class="rules__list">
-                <li>三名球员轮流罚点球，每人每轮 1 脚。</li>
-                <li>默认 5 轮，共 15 次射门；结束后统计总进球。</li>
-                <li>守门员会“猜”一个方向并扑救；球太靠角或速度太快更难扑。</li>
-              </ul>
             </div>
           </div>
         </section>
@@ -138,6 +57,35 @@
           本地运行：直接双击打开 <code>index.html</code> 即可。
         </div>
       </footer>
+    </div>
+
+    <div class="endOverlay" id="endOverlay" aria-hidden="true">
+      <div class="endCard" role="dialog" aria-label="比赛结果">
+        <div class="endTrophy" aria-hidden="true">
+          <svg viewBox="0 0 256 256" width="140" height="140">
+            <defs>
+              <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+                <stop offset="0" stop-color="#fbbf24" />
+                <stop offset="0.55" stop-color="#f59e0b" />
+                <stop offset="1" stop-color="#b45309" />
+              </linearGradient>
+              <linearGradient id="s" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0" stop-color="rgba(255,255,255,0.55)" />
+                <stop offset="1" stop-color="rgba(255,255,255,0)" />
+              </linearGradient>
+            </defs>
+            <path fill="url(#g)" d="M80 44h96v20c0 34-20 64-48 72-28-8-48-38-48-72V44z"/>
+            <path fill="url(#g)" d="M62 58H44c0 40 18 70 44 80v-18c-16-8-26-32-26-62z"/>
+            <path fill="url(#g)" d="M194 58h18c0 40-18 70-44 80v-18c16-8 26-32 26-62z"/>
+            <path fill="url(#g)" d="M102 136h52v24c0 10 6 18 14 22v18H88v-18c8-4 14-12 14-22v-24z"/>
+            <path fill="url(#g)" d="M72 200h112v12c0 12-10 22-22 22H94c-12 0-22-10-22-22v-12z"/>
+            <path fill="url(#s)" d="M92 52h24c0 44-10 70-24 82V52z" opacity="0.6"/>
+          </svg>
+        </div>
+        <div class="endTitle" id="endTitle">—</div>
+        <div class="endSub" id="endSub">—</div>
+        <button class="btn" id="playAgainBtn" type="button">再来一局</button>
+      </div>
     </div>
 
     <script src="./main.js?v=20260421" defer></script>

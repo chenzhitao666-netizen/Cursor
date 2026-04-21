@@ -1,7 +1,8 @@
 /* eslint-disable no-use-before-define */
 const CONFIG = {
-  rounds: 5,
-  players: ["球员 1", "球员 2", "球员 3"],
+  shotsPerRound: 5,
+  rounds: 2,
+  players: ["陈志涛", "姜国鑫"],
   animMs: 1150,
 };
 
@@ -21,8 +22,7 @@ const DIRS = /** @type {const} */ ({
 
 const state = {
   round: 1,
-  shooterIdx: 0,
-  shotsTaken: 0,
+  shotsTaken: 0, // shots in current round
   busy: false,
   // per player: array of outcomes length <= rounds
   history: CONFIG.players.map(() => /** @type {ShotOutcome[]} */ ([])),
@@ -43,6 +43,8 @@ const state = {
   },
   aim: {
     active: false,
+    locked: false,
+    inGoal: true,
     x: 0,
     y: 0,
   },
@@ -68,6 +70,19 @@ const state = {
   },
 };
 
+const PLAYER_COLORS = [
+  { shirt: "rgba(30, 64, 175, 0.95)" }, // blue
+  { shirt: "rgba(22, 163, 74, 0.95)" }, // green
+];
+
+function shooterIdxForRound() {
+  return state.round === 1 ? 0 : 1;
+}
+
+function goalieIdxForRound() {
+  return shooterIdxForRound() === 0 ? 1 : 0;
+}
+
 // DOM
 const $ = (sel) => /** @type {HTMLElement} */ (document.querySelector(sel));
 const $$ = (sel) => /** @type {NodeListOf<HTMLElement>} */ (document.querySelectorAll(sel));
@@ -76,21 +91,23 @@ const pitch = /** @type {HTMLCanvasElement} */ ($("#pitch"));
 const ctx = pitch.getContext("2d");
 if (!ctx) throw new Error("Canvas 不支持");
 
-const shootBtn = /** @type {HTMLButtonElement} */ ($("#shootBtn"));
 const resetBtn = /** @type {HTMLButtonElement} */ ($("#resetBtn"));
-const skipAnimBtn = /** @type {HTMLButtonElement} */ ($("#skipAnimBtn"));
 const soundBtn = /** @type {HTMLButtonElement|null} */ (document.querySelector("#soundBtn"));
-const powerInput = /** @type {HTMLInputElement} */ ($("#power"));
-const curveInput = /** @type {HTMLInputElement} */ ($("#curve"));
+const powerOverlay = /** @type {HTMLDivElement|null} */ (document.querySelector("#powerOverlay"));
 const powerMeter = /** @type {HTMLDivElement|null} */ (document.querySelector("#powerMeter"));
 const powerBall = /** @type {HTMLDivElement|null} */ (document.querySelector("#powerBall"));
 
-const powerValue = $("#powerValue");
-const curveValue = $("#curveValue");
 const currentPlayerName = $("#currentPlayerName");
 const resultText = /** @type {HTMLElement|null} */ (document.querySelector("#resultText"));
 const roundPill = $("#roundPill");
-const scoreRows = $("#scoreRows");
+const scoreRows = /** @type {HTMLElement|null} */ (document.querySelector("#scoreRows"));
+const miniScorePoints = /** @type {HTMLElement|null} */ (document.querySelector("#miniScorePoints"));
+const miniScoreDots = /** @type {HTMLElement|null} */ (document.querySelector("#miniScoreDots"));
+const appRoot = /** @type {HTMLElement|null} */ (document.querySelector("#appRoot"));
+const endOverlay = /** @type {HTMLElement|null} */ (document.querySelector("#endOverlay"));
+const endTitle = /** @type {HTMLElement|null} */ (document.querySelector("#endTitle"));
+const endSub = /** @type {HTMLElement|null} */ (document.querySelector("#endSub"));
+const playAgainBtn = /** @type {HTMLButtonElement|null} */ (document.querySelector("#playAgainBtn"));
 
 // Pitch geometry (canvas coordinates)
 const geom = {
@@ -301,15 +318,11 @@ function pickOutcomeQuote(outcome) {
 }
 
 function dirFromUI() {
-  const el = /** @type {HTMLInputElement|null} */ (document.querySelector('input[name="dir"]:checked'));
-  return (el?.value || "MC");
+  return "MC";
 }
 
 function setDirToUI(dirKey) {
-  const key = DIRS[dirKey] ? dirKey : "MC";
-  const el = /** @type {HTMLInputElement|null} */ (document.querySelector(`input[name="dir"][value="${key}"]`));
-  if (!el) return;
-  el.checked = true;
+  void dirKey;
 }
 
 function dirToCoord(dirKey) {
@@ -371,15 +384,7 @@ function aimPointFromCanvasPointer(clientX, clientY) {
 
   const x = sx * geom.w;
   const y = sy * geom.h;
-
-  const gx = geom.goal.x;
-  const gy = geom.goal.y;
-  const gw = geom.goal.w;
-  const gh = geom.goal.h;
-
-  const ax = clamp(x, gx + 18, gx + gw - 18);
-  const ay = clamp(y, gy + 18, gy + gh - 18);
-  return { x: ax, y: ay };
+  return { x, y };
 }
 
 function aimPointToDir(aim) {
@@ -395,8 +400,8 @@ function aimPointToDir(aim) {
 }
 
 function getShotDir() {
-  if (state.aim.active) return aimPointToDir({ x: state.aim.x, y: state.aim.y });
-  return dirFromUI();
+  if (state.aim.locked) return aimPointToDir({ x: state.aim.x, y: state.aim.y });
+  return "MC";
 }
 
 function getAimTarget(curvePx) {
@@ -412,17 +417,19 @@ function setHUD(text, tone = "neutral") {
 }
 
 function getTotals() {
-  return state.history.map((arr) => ({
-    goals: arr.filter((x) => x === "GOAL").length,
-    saves: arr.filter((x) => x === "SAVE").length,
-    miss: arr.filter((x) => x === "MISS").length,
-  }));
+  return state.history.map((arr) => {
+    const goals = arr.filter((x) => x === "GOAL").length;
+    const saves = arr.filter((x) => x === "SAVE").length;
+    const miss = arr.filter((x) => x === "MISS").length;
+    const points = goals; // only goals score 1 point
+    return { goals, saves, miss, points };
+  });
 }
 
 function renderScoreboard() {
-  scoreRows.innerHTML = "";
+  if (scoreRows) scoreRows.innerHTML = "";
   const totals = getTotals();
-  CONFIG.players.forEach((name, i) => {
+  if (scoreRows) CONFIG.players.forEach((name, i) => {
     const row = document.createElement("div");
     row.className = "scoreRow";
     row.setAttribute("role", "listitem");
@@ -437,7 +444,7 @@ function renderScoreboard() {
     const shots = document.createElement("div");
     shots.className = "scoreRow__shots";
 
-    for (let r = 0; r < CONFIG.rounds; r++) {
+    for (let r = 0; r < CONFIG.shotsPerRound; r++) {
       const dot = document.createElement("div");
       dot.className = "shotDot";
       const v = state.history[i][r];
@@ -452,40 +459,56 @@ function renderScoreboard() {
 
     const score = document.createElement("div");
     score.className = "scoreRow__score";
-    score.textContent = `进球 ${totals[i].goals} / ${CONFIG.rounds}`;
+    score.textContent = `得分 ${totals[i].points} · 进${totals[i].goals} 扑${totals[i].saves} 偏${totals[i].miss}`;
 
     row.appendChild(left);
     row.appendChild(score);
     scoreRows.appendChild(row);
   });
+
+  // mini overlay (single player)
+  const sIdx = shooterIdxForRound();
+  if (miniScorePoints) miniScorePoints.textContent = String(totals[sIdx]?.points ?? 0);
+  if (miniScoreDots) {
+    miniScoreDots.innerHTML = "";
+    const arr = state.history[sIdx] || [];
+    for (let r = 0; r < CONFIG.shotsPerRound; r++) {
+      const dot = document.createElement("div");
+      dot.className = "miniDot";
+      const v = arr[r];
+      if (v === "GOAL") dot.classList.add("miniDot--goal");
+      else if (v === "SAVE") dot.classList.add("miniDot--save");
+      else if (v === "MISS") dot.classList.add("miniDot--miss");
+      miniScoreDots.appendChild(dot);
+    }
+  }
 }
 
 function updateHeader() {
-  roundPill.textContent = `第 ${state.round} 轮`;
-  currentPlayerName.textContent = CONFIG.players[state.shooterIdx];
+  roundPill.textContent = CONFIG.players[shooterIdxForRound()];
+  currentPlayerName.textContent = CONFIG.players[shooterIdxForRound()];
 }
 
 function resetGame() {
   clearStampTimers();
   state.stamp.visible = false;
+  hideEndOverlay();
   state.round = 1;
-  state.shooterIdx = 0;
   state.shotsTaken = 0;
   state.busy = false;
   state.history = CONFIG.players.map(() => []);
   state.anim.running = false;
   state.aim.active = false;
+  state.aim.locked = false;
+  state.aim.inGoal = true;
   state.meter.active = false;
   state.meter.locked = false;
   setPowerBallPos01(0.5);
+  powerOverlay?.classList.remove("powerOverlay--show");
   powerMeter?.classList.remove("powerMeter--armed");
   powerMeter?.classList.remove("powerMeter--locked");
   setDirToUI("MC");
-  powerInput.value = "70";
-  curveInput.value = "25";
-  powerValue.textContent = "70";
-  curveValue.textContent = "25";
-  shootBtn.disabled = false;
+  // no UI sliders
   setHUD("请选择方向并射门", "neutral");
   renderScoreboard();
   updateHeader();
@@ -494,13 +517,15 @@ function resetGame() {
 }
 
 function isGameOver() {
-  return state.shotsTaken >= CONFIG.rounds * CONFIG.players.length;
+  return state.round > CONFIG.rounds;
 }
 
 function advanceTurn() {
   state.shotsTaken += 1;
-  state.shooterIdx = (state.shooterIdx + 1) % CONFIG.players.length;
-  state.round = Math.floor(state.shotsTaken / CONFIG.players.length) + 1;
+  if (state.shotsTaken >= CONFIG.shotsPerRound) {
+    state.round += 1;
+    state.shotsTaken = 0;
+  }
 }
 
 function goalTargetForDir(dirKey, curvePx) {
@@ -539,57 +564,21 @@ function goalieTargetForDir(dirKey) {
   return { x, y };
 }
 
-function chooseGoalieDir(shotDir, speed, curve) {
-  // deterministic-ish randomness so same situation feels consistent per attempt
-  const seed = (Date.now() ^ (state.shotsTaken + 1) * 2654435761) >>> 0;
-  const rnd = mulberry32(seed);
+function outcomeFromAimAndMeter(pos01) {
+  // Direction wrong (outside goal) => MISS no matter what.
+  if (!state.aim.inGoal) return /** @type {ShotOutcome} */ ("MISS");
 
-  // base: mostly random with a slight bias to follow the shot direction when speed is low
-  const followBias = clamp(0.18 + (1 - speed / 100) * 0.22, 0.12, 0.4);
-  const curveNoise = clamp(curve / 100, 0, 0.6);
-
-  if (rnd() < followBias * (1 - 0.35 * curveNoise)) return shotDir;
-
-  const keys = Object.keys(DIRS);
-  return keys[Math.floor(rnd() * keys.length)];
-}
-
-function outcomeForShot(shotDir, goalieDir, speed, curve) {
-  const d = DIRS[shotDir] ?? DIRS.MC;
-  const g = DIRS[goalieDir] ?? DIRS.MC;
-
-  // miss chance: stronger + closer to corners (top corners worst)
-  const cornerness = (Math.abs(d.col - 1) + Math.abs(d.row - 1)) / 2; // 0..1
-  const topBonus = d.row === 0 ? 0.25 : 0;
-  const power = speed / 100;
-  const curveFactor = curve / 100;
-  const missChance = clamp(0.03 + power * 0.16 + cornerness * 0.18 + topBonus * 0.12 + curveFactor * 0.06, 0.02, 0.42);
-
-  const seed = (Date.now() ^ ((state.shotsTaken + 7) * 1597334677)) >>> 0;
-  const rnd = mulberry32(seed);
-  if (rnd() < missChance) return /** @type {ShotOutcome} */ ("MISS");
-
-  // save chance depends on whether goalie guessed correct cell + speed/cornerness
-  const sameCell = d.col === g.col && d.row === g.row;
-  const nearCell = Math.abs(d.col - g.col) + Math.abs(d.row - g.row) === 1;
-
-  let saveChance = 0.08;
-  saveChance += sameCell ? 0.52 : nearCell ? 0.14 : 0.0;
-  saveChance -= power * 0.26; // fast shots harder to save
-  saveChance -= cornerness * 0.18; // corners harder
-  saveChance += (1 - curveFactor) * 0.06; // lots of curve is harder
-  saveChance = clamp(saveChance, 0.03, 0.78);
-
-  return rnd() < saveChance ? "SAVE" : "GOAL";
+  // Direction correct:
+  // - left red => too weak => SAVE
+  // - green => GOAL
+  // - right red => too strong => MISS
+  if (pos01 < 1 / 3) return /** @type {ShotOutcome} */ ("SAVE");
+  if (pos01 <= 2 / 3) return /** @type {ShotOutcome} */ ("GOAL");
+  return /** @type {ShotOutcome} */ ("MISS");
 }
 
 function lockUI(locked) {
   state.busy = locked;
-  shootBtn.disabled = locked || isGameOver();
-  skipAnimBtn.disabled = !state.anim.running;
-  $$(".dir input").forEach((el) => (/** @type {HTMLInputElement} */ (el).disabled = locked));
-  powerInput.disabled = locked;
-  curveInput.disabled = locked;
   if (powerMeter) powerMeter.style.pointerEvents = locked ? "none" : "auto";
 }
 
@@ -597,7 +586,7 @@ function drawStatic() {
   drawScene({
     ball: null,
     goalie: { x: geom.goal.x + geom.goal.w / 2, y: geom.goal.y + geom.goal.h * 0.62 },
-    aim: getAimTarget(Number(curveInput.value) * 0.6),
+    aim: getAimTarget(0),
     outcome: null,
     goalieDir: null,
     shotDir: null,
@@ -646,13 +635,13 @@ function drawScene({ ball, goalie, aim, outcome, goalieDir, shotDir }) {
   }
 
   // goalie
-  drawGoalie(goalie.x, goalie.y, goalieDir, shotDir, outcome);
+  drawGoalie(goalie.x, goalie.y, PLAYER_COLORS[goalieIdxForRound()].shirt, goalieDir, shotDir, outcome);
 
   // ball
   if (ball) drawBall(ball.x, ball.y, ball.scale);
 
   // player silhouette near spot
-  drawShooter(geom.spot.x - 50, geom.spot.y + 20);
+  drawShooter(geom.spot.x - 50, geom.spot.y + 20, PLAYER_COLORS[shooterIdxForRound()].shirt);
 
   // overlay for outcome at end frame
   if (state.stamp.visible && !state.anim.running) {
@@ -862,12 +851,12 @@ function drawBall(x, y, scale = 1) {
   ctx.restore();
 }
 
-function drawShooter(x, y) {
+function drawShooter(x, y, shirtColor) {
   ctx.save();
   ctx.translate(x, y);
   ctx.globalAlpha = 0.92;
   // body
-  ctx.fillStyle = "rgba(30, 64, 175, 0.95)";
+  ctx.fillStyle = shirtColor;
   ctx.beginPath();
   ctx.roundRect(0, -55, 26, 36, 10);
   ctx.fill();
@@ -885,7 +874,7 @@ function drawShooter(x, y) {
   ctx.restore();
 }
 
-function drawGoalie(x, y, goalieDir, shotDir, outcome) {
+function drawGoalie(x, y, shirtColor, goalieDir, shotDir, outcome) {
   ctx.save();
   ctx.translate(x, y);
   ctx.globalAlpha = 0.95;
@@ -899,7 +888,7 @@ function drawGoalie(x, y, goalieDir, shotDir, outcome) {
   ctx.globalAlpha = 0.95;
 
   // torso
-  ctx.fillStyle = "rgba(22, 163, 74, 0.95)";
+  ctx.fillStyle = shirtColor;
   ctx.beginPath();
   ctx.roundRect(-18, -18, 36, 36, 12);
   ctx.fill();
@@ -960,7 +949,7 @@ function drawOutcomeStamp(outcome, mode, quote) {
 }
 
 function updateShootButtonLabel() {
-  shootBtn.textContent = state.meter.active ? "点我停球" : "射门（开始力度）";
+  // UI removed
 }
 
 function setPowerBallPos01(pos01) {
@@ -980,6 +969,7 @@ function startMeter() {
   state.meter.active = true;
   state.meter.locked = false;
   state.meter.startTs = performance.now();
+  powerOverlay?.classList.add("powerOverlay--show");
   powerMeter.classList.add("powerMeter--armed");
   powerMeter.classList.remove("powerMeter--locked");
   setHUD("停在绿色区，才算有效射门", "neutral");
@@ -999,52 +989,15 @@ function lockMeterAndShoot() {
   updateShootButtonLabel();
 
   const pos = state.meter.pos01;
-  const ok = meterInGreen(pos);
-  SFX.meterStop(ok);
-  if (!ok) {
-    // timing failed -> immediate miss, but still play animation
-    const shotDir = getShotDir();
-    const curve = Number(curveInput.value);
-    const target = state.aim.active ? { x: state.aim.x, y: state.aim.y } : goalTargetForDir(shotDir, curve * 0.75);
-    const missTarget = { x: target.x + (target.x < geom.goal.x + geom.goal.w / 2 ? -40 : 40), y: target.y + 22 };
-
-    state.history[state.shooterIdx].push("MISS");
-    state.anim.stampQuote = pickOutcomeQuote("MISS");
-
-    state.anim.running = true;
-    state.anim.startTs = performance.now();
-    state.anim.from = { x: geom.spot.x, y: geom.spot.y };
-    state.anim.to = missTarget;
-    state.anim.curve = curve;
-    state.anim.goalieFrom = goalieTargetForDir("MC");
-    state.anim.goalieDir = "MC";
-    state.anim.goalieTo = goalieTargetForDir("MC");
-    state.anim.outcome = "MISS";
-    state.anim.shotDir = shotDir;
-    state.anim.speed = 74;
-
-    lockUI(true);
-    skipAnimBtn.disabled = false;
-    renderScoreboard();
-    SFX.kick();
-    SFX.miss();
-    requestAnimationFrame(tick);
-    return;
-  }
-
-  // timing ok -> map to a speed; closer to center = faster (harder to save)
-  const dist = Math.abs(pos - 0.5);
-  const halfGreen = 1 / 6;
-  const quality = clamp(1 - dist / halfGreen, 0, 1);
-  const speed = Math.round(62 + quality * 34);
-  powerInput.value = String(speed);
-  powerValue.textContent = String(speed);
+  const outcome = outcomeFromAimAndMeter(pos);
+  SFX.meterStop(outcome === "GOAL");
   startShot();
 }
 
 function tickMeter(ts) {
   if (!state.meter.active) return;
-  const t = (ts - state.meter.startTs) / 900;
+  // slower movement
+  const t = (ts - state.meter.startTs) / 1700;
   const pos = 0.5 + 0.5 * Math.sin(t * Math.PI * 2);
   setPowerBallPos01(pos);
   requestAnimationFrame(tickMeter);
@@ -1054,21 +1007,23 @@ function startShot() {
   if (state.busy || isGameOver()) return;
 
   const shotDir = getShotDir();
-  const speed = Number(powerInput.value);
-  const curve = Number(curveInput.value);
-
-  const goalieDir = chooseGoalieDir(shotDir, speed, curve);
-  const outcome = outcomeForShot(shotDir, goalieDir, speed, curve);
+  const speed = 74;
+  const curve = 0;
+  const outcome = outcomeFromAimAndMeter(state.meter.pos01);
+  const goalieDir = outcome === "SAVE" ? shotDir : "MC";
   state.anim.stampQuote = pickOutcomeQuote(outcome);
   SFX.kick();
 
   // store now (so skip animation still consistent)
-  state.history[state.shooterIdx].push(outcome);
+  state.history[shooterIdxForRound()].push(outcome);
 
   state.anim.running = true;
   state.anim.startTs = performance.now();
   state.anim.from = { x: geom.spot.x, y: geom.spot.y };
-  state.anim.to = state.aim.active ? { x: state.aim.x, y: state.aim.y } : goalTargetForDir(shotDir, curve * 0.75);
+  state.anim.to =
+    state.aim.locked
+      ? { x: clamp(state.aim.x, 0, geom.w), y: clamp(state.aim.y, 0, geom.h) }
+      : goalTargetForDir(shotDir, curve * 0.75);
   state.anim.curve = curve;
   state.anim.goalieFrom = goalieTargetForDir("MC");
   state.anim.goalieTo = goalieTargetForDir(goalieDir);
@@ -1078,7 +1033,6 @@ function startShot() {
   state.anim.speed = speed;
 
   lockUI(true);
-  skipAnimBtn.disabled = false;
 
   setHUD("起脚！", "neutral");
   renderScoreboard();
@@ -1086,12 +1040,39 @@ function startShot() {
   requestAnimationFrame(tick);
 }
 
+function showEndOverlay() {
+  if (!appRoot || !endOverlay || !endTitle || !endSub) return;
+  const totals = getTotals();
+  const a = totals[0]?.points ?? 0;
+  const b = totals[1]?.points ?? 0;
+
+  let title = "平局！";
+  if (a > b) title = `${CONFIG.players[0]} 获胜！`;
+  else if (b > a) title = `${CONFIG.players[1]} 获胜！`;
+
+  endTitle.textContent = title;
+  endSub.textContent = `${CONFIG.players[0]}：${a} 分   ·   ${CONFIG.players[1]}：${b} 分`;
+  appRoot.classList.add("app--blurred");
+  endOverlay.classList.add("endOverlay--show");
+  endOverlay.setAttribute("aria-hidden", "false");
+}
+
+function hideEndOverlay() {
+  appRoot?.classList.remove("app--blurred");
+  endOverlay?.classList.remove("endOverlay--show");
+  endOverlay?.setAttribute("aria-hidden", "true");
+}
+
 function finalizeShot() {
   state.anim.running = false;
   lockUI(false);
-  skipAnimBtn.disabled = true;
 
   const outcome = state.anim.outcome;
+  // After the shot resolves, allow aiming again and hide the meter overlay.
+  state.aim.locked = false;
+  powerOverlay?.classList.remove("powerOverlay--show");
+  powerMeter?.classList.remove("powerMeter--armed");
+  powerMeter?.classList.remove("powerMeter--locked");
 
   if (outcome === "GOAL") {
     const q = pickGoalQuote();
@@ -1106,14 +1087,7 @@ function finalizeShot() {
   renderScoreboard();
 
   if (isGameOver()) {
-    shootBtn.disabled = true;
-    const totals = getTotals();
-    const sum = totals.reduce((acc, t) => acc + t.goals, 0);
-    const winnerIdx = totals
-      .map((t, i) => ({ goals: t.goals, i }))
-      .sort((a, b) => b.goals - a.goals)[0]?.i;
-    const winner = winnerIdx !== undefined ? CONFIG.players[winnerIdx] : "—";
-    setHUD(`比赛结束：总进球 ${sum}。最佳射手：${winner}。点击“重开”再来一局。`, "neutral");
+    showEndOverlay();
   }
 }
 
@@ -1233,12 +1207,8 @@ function showStampSequence(outcome, goalieDir, shotDir) {
 }
 
 function wireEvents() {
-  shootBtn.addEventListener("click", () => {
-    if (state.busy || isGameOver()) return;
-    if (!state.meter.active) startMeter();
-    else lockMeterAndShoot();
-  });
   resetBtn.addEventListener("click", () => resetGame());
+  playAgainBtn?.addEventListener("click", () => resetGame());
   // Unlock audio on first user gesture (mobile browsers require this).
   const unlockOnce = () => {
     SFX.unlock();
@@ -1256,11 +1226,10 @@ function wireEvents() {
     if (next) SFX.meterStart();
   });
 
-  skipAnimBtn.addEventListener("click", () => skipAnimation());
-
   // Mobile-friendly aiming: drag on the goal to move dashed aim.
   pitch.addEventListener("pointerdown", (e) => {
     if (state.busy || isGameOver()) return;
+    if (state.meter.active || state.aim.locked) return;
     const aim = aimPointFromCanvasPointer(e.clientX, e.clientY);
     if (!aim) return;
     e.preventDefault();
@@ -1275,6 +1244,7 @@ function wireEvents() {
   pitch.addEventListener("pointermove", (e) => {
     if (!state.aim.active) return;
     if (state.busy || isGameOver()) return;
+    if (state.aim.locked || state.meter.active) return;
     const aim = aimPointFromCanvasPointer(e.clientX, e.clientY);
     if (!aim) return;
     e.preventDefault();
@@ -1287,20 +1257,18 @@ function wireEvents() {
   const endAim = (e) => {
     if (!state.aim.active) return;
     e.preventDefault?.();
+    // lock direction on release, then show meter and start it
+    const gx = geom.goal.x;
+    const gy = geom.goal.y;
+    const gw = geom.goal.w;
+    const gh = geom.goal.h;
+    state.aim.inGoal = state.aim.x >= gx && state.aim.x <= gx + gw && state.aim.y >= gy && state.aim.y <= gy + gh;
+    state.aim.locked = true;
+    state.aim.active = false;
+    startMeter();
   };
   pitch.addEventListener("pointerup", endAim);
   pitch.addEventListener("pointercancel", endAim);
-
-  powerInput.addEventListener("input", () => {
-    powerValue.textContent = String(powerInput.value);
-  });
-  curveInput.addEventListener("input", () => {
-    curveValue.textContent = String(curveInput.value);
-    drawStatic();
-  });
-  $$('input[name="dir"]').forEach((el) => {
-    el.addEventListener("change", () => drawStatic());
-  });
 
   powerMeter?.addEventListener("pointerdown", (e) => {
     if (state.busy || isGameOver()) return;
@@ -1312,35 +1280,10 @@ function wireEvents() {
   window.addEventListener("keydown", (e) => {
     const k = e.key;
 
-    // keyboard aiming (3x3)
-    if (!state.busy && !isGameOver()) {
-      if (k === "ArrowLeft") {
-        e.preventDefault();
-        moveDirBy(-1, 0);
-        return;
-      }
-      if (k === "ArrowRight") {
-        e.preventDefault();
-        moveDirBy(1, 0);
-        return;
-      }
-      if (k === "ArrowUp") {
-        e.preventDefault();
-        moveDirBy(0, -1);
-        return;
-      }
-      if (k === "ArrowDown") {
-        e.preventDefault();
-        moveDirBy(0, 1);
-        return;
-      }
-    }
-
     if (k === "Enter" || k === " ") {
       e.preventDefault();
       if (state.busy || isGameOver()) return;
-      if (!state.meter.active) startMeter();
-      else lockMeterAndShoot();
+      if (state.meter.active) lockMeterAndShoot();
       return;
     }
     if (k.toLowerCase() === "r") {
